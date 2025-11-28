@@ -7,7 +7,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart' as syncfusion;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:vector_math/vector_math_64.dart' show Matrix4;
+import 'package:image/image.dart' as img;
 import '../models/page_layout.dart';
 import '../models/combine_mode.dart';
 
@@ -309,12 +309,17 @@ class PdfService {
           : resolvedMode;
 
       final List<CombinedSheet> sheets = [];
-      // For both modes: pages go left/right on landscape sheet
-      // Portrait mode: each page is rotated 90° so tall pages fit side-by-side
-      final PagePosition primaryPosition = PagePosition.left;
-      final PagePosition secondaryPosition = PagePosition.right;
-      final double defaultRotation =
-          effectiveMode == CombineMode.portrait ? 90.0 : 0.0;
+      // Landscape mode: pages side-by-side (left/right) on landscape sheet
+      // Portrait mode: pages stacked vertically (top/bottom) on portrait sheet
+      // NO rotation in either mode - pages keep their original orientation
+      final PagePosition primaryPosition =
+          effectiveMode == CombineMode.landscape
+              ? PagePosition.left
+              : PagePosition.top;
+      final PagePosition secondaryPosition =
+          effectiveMode == CombineMode.landscape
+              ? PagePosition.right
+              : PagePosition.bottom;
 
       for (int i = 0; i < totalPages; i += 2) {
         final firstPage = PageLayout(
@@ -323,7 +328,7 @@ class PdfService {
           position: primaryPosition,
           scale: 1.0,
           offset: Offset.zero,
-          rotation: defaultRotation,
+          rotation: 0.0, // No rotation - pages stay in original orientation
         );
 
         PageLayout? secondPage;
@@ -334,7 +339,7 @@ class PdfService {
             position: secondaryPosition,
             scale: 1.0,
             offset: Offset.zero,
-            rotation: defaultRotation,
+            rotation: 0.0, // No rotation - pages stay in original orientation
           );
         }
 
@@ -366,89 +371,139 @@ class PdfService {
     final bytes = await _resolveBytes(inputFile);
 
     final pdf = pw.Document();
-    // Always use landscape A4 - pages are placed side-by-side
-    final PdfPageFormat pageFormat = PdfPageFormat.a4.landscape;
+    // Landscape mode: A4 landscape (pages side-by-side)
+    // Portrait mode: A4 portrait (pages stacked vertically)
+    final PdfPageFormat pageFormat = layout.layoutMode == CombineMode.landscape
+        ? PdfPageFormat.a4.landscape
+        : PdfPageFormat.a4; // Portrait A4: 210mm x 297mm
 
     // Render each sheet
     for (final sheet in layout.sheets) {
-      final List<pw.Widget> pageWidgets = [];
+      if (layout.layoutMode == CombineMode.portrait) {
+        // Portrait mode: Stack pages vertically using Column with Expanded
+        // Source portrait pages are rotated 90° clockwise to become landscape
+        // Then stacked vertically on portrait A4
+        final List<pw.Widget> columnChildren = [];
 
-      for (final pageLayout in sheet.pages) {
-        final widget = await _buildPageWidget(bytes, pageLayout, pageFormat);
-        pageWidgets.add(widget);
+        for (int i = 0; i < sheet.pages.length; i++) {
+          final pageLayout = sheet.pages[i];
+          // Render and rotate page 90° clockwise (portrait → landscape)
+          final imageBytes = await _renderAndRotatePageForPortraitMode(
+              bytes, pageLayout.pageIndex);
+          final image = pw.MemoryImage(imageBytes);
+
+          columnChildren.add(
+            pw.Expanded(
+              flex: 1,
+              child: pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Image(image, fit: pw.BoxFit.contain),
+              ),
+            ),
+          );
+
+          // Add divider between pages (not after the last one)
+          if (i < sheet.pages.length - 1) {
+            columnChildren.add(pw.SizedBox(height: 4));
+            columnChildren.add(pw.Divider(thickness: 1));
+            columnChildren.add(pw.SizedBox(height: 4));
+          }
+        }
+
+        // If only one page, add empty expanded to fill the other half
+        if (sheet.pages.length == 1) {
+          columnChildren.add(pw.Expanded(flex: 1, child: pw.Container()));
+        }
+
+        pdf.addPage(
+          pw.Page(
+            pageFormat: pageFormat,
+            margin: const pw.EdgeInsets.all(12),
+            build: (context) {
+              return pw.Column(
+                mainAxisAlignment: pw.MainAxisAlignment.start,
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: columnChildren,
+              );
+            },
+          ),
+        );
+      } else {
+        // Landscape mode: Use Row with side-by-side layout (no rotation)
+        final List<pw.Widget> rowChildren = [];
+
+        for (int i = 0; i < sheet.pages.length; i++) {
+          final pageLayout = sheet.pages[i];
+          final imageBytes =
+              await _renderPageToImage(bytes, pageLayout.pageIndex);
+          final image = pw.MemoryImage(imageBytes);
+
+          rowChildren.add(
+            pw.Expanded(
+              flex: 1,
+              child: pw.Container(
+                padding: const pw.EdgeInsets.all(8),
+                child: pw.Image(image, fit: pw.BoxFit.contain),
+              ),
+            ),
+          );
+
+          // Add divider between pages (not after the last one)
+          if (i < sheet.pages.length - 1) {
+            rowChildren.add(
+              pw.Container(
+                width: 1,
+                color: PdfColors.grey400,
+              ),
+            );
+          }
+        }
+
+        // If only one page, add empty expanded to fill the other half
+        if (sheet.pages.length == 1) {
+          rowChildren.add(pw.Expanded(flex: 1, child: pw.Container()));
+        }
+
+        pdf.addPage(
+          pw.Page(
+            pageFormat: pageFormat,
+            margin: const pw.EdgeInsets.all(12),
+            build: (context) {
+              return pw.Row(
+                children: rowChildren,
+              );
+            },
+          ),
+        );
       }
-
-      pdf.addPage(
-        pw.Page(
-          pageFormat: pageFormat,
-          build: (context) {
-            return pw.Stack(children: pageWidgets);
-          },
-        ),
-      );
     }
 
     return pdf.save();
   }
 
-  Future<pw.Widget> _buildPageWidget(
-    Uint8List pdfBytes,
-    PageLayout layout,
-    PdfPageFormat pageFormat,
-  ) async {
+  /// Render page and rotate 90° clockwise for portrait mode
+  /// This converts portrait source pages to landscape orientation
+  Future<Uint8List> _renderAndRotatePageForPortraitMode(
+      Uint8List pdfBytes, int pageIndex) async {
     // Render page to image
-    final imageBytes = await _renderPageToImage(pdfBytes, layout.pageIndex);
-    final image = pw.MemoryImage(imageBytes);
+    final originalBytes = await _renderPageToImage(pdfBytes, pageIndex);
 
-    // Calculate position
-    final double pageWidth = pageFormat.width;
-    final double pageHeight = pageFormat.height;
-    double targetWidth = pageWidth;
-    double targetHeight = pageHeight;
-    double left = 0;
-    double top = 0;
-
-    switch (layout.position) {
-      case PagePosition.left:
-        targetWidth = pageWidth / 2;
-        left = 0;
-        break;
-      case PagePosition.right:
-        targetWidth = pageWidth / 2;
-        left = pageWidth / 2;
-        break;
-      case PagePosition.top:
-        // Portrait mode: each half gets full width and half height
-        targetWidth = pageWidth;
-        targetHeight = pageHeight / 2;
-        top = 0;
-        break;
-      case PagePosition.bottom:
-        // Portrait mode: each half gets full width and half height
-        targetWidth = pageWidth;
-        targetHeight = pageHeight / 2;
-        top = pageHeight / 2;
-        break;
-      case PagePosition.full:
-        break;
+    // Decode the image
+    final originalImage = img.decodeImage(originalBytes);
+    if (originalImage == null) {
+      throw Exception('Failed to decode page $pageIndex');
     }
 
-    return pw.Positioned(
-      left: left,
-      top: top,
-      child: pw.Container(
-        width: targetWidth,
-        height: targetHeight,
-        alignment: pw.Alignment.center,
-        child: pw.Transform(
-          transform: Matrix4.identity()
-            ..translate(layout.offset.dx, layout.offset.dy)
-            ..scale(layout.scale)
-            ..rotateZ(layout.rotation * math.pi / 180),
-          child: pw.Image(image, fit: pw.BoxFit.contain),
-        ),
-      ),
-    );
+    // Check if page is portrait (height > width) - if so, rotate 90° clockwise
+    if (originalImage.height > originalImage.width) {
+      // Rotate 90° clockwise to make it landscape
+      final rotatedImage = img.copyRotate(originalImage, angle: 90);
+      return Uint8List.fromList(img.encodePng(rotatedImage));
+    }
+
+    // Already landscape, return as-is
+    return originalBytes;
   }
 
   Future<Uint8List> _renderPageToImage(

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
 import '../models/page_layout.dart';
+import '../models/combine_mode.dart';
 import '../services/pdf_service.dart';
 
 class PreviewEditorScreen extends StatefulWidget {
@@ -150,14 +151,17 @@ class _PreviewEditorScreenState extends State<PreviewEditorScreen> {
   }
 
   Widget _buildPreviewGrid() {
-    // Always landscape A4 sheet with pages side-by-side
+    // Portrait mode: A4 portrait | Landscape mode: A4 landscape
+    final bool isLandscape = _currentLayout.layoutMode == CombineMode.landscape;
     const double a4LandscapeRatio = 1.414; // width / height for A4 landscape
+    const double a4PortraitRatio = 0.707; // width / height for A4 portrait
+    final double aspectRatio = isLandscape ? a4LandscapeRatio : a4PortraitRatio;
 
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: MediaQuery.of(context).size.width > 800 ? 2 : 1,
-        childAspectRatio: a4LandscapeRatio,
+        childAspectRatio: aspectRatio,
         crossAxisSpacing: 16,
         mainAxisSpacing: 16,
       ),
