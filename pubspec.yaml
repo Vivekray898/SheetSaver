@@ -1,5 +1,5 @@
-name: pdf2go
-description: "A new Flutter project."
+name: sheetsaver
+description: "SheetSaver helps combine PDF pages onto fewer sheets."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -38,6 +38,10 @@ dependencies:
   syncfusion_flutter_pdf: ^24.2.9
   share_plus: ^7.2.2
   permission_handler: ^11.3.0
+  syncfusion_flutter_pdfviewer: ^24.2.9
+  cunning_document_scanner: ^1.2.3
+  image: ^4.5.4
+  vector_math: ^2.1.4
 
 dev_dependencies:
   flutter_test:

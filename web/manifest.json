@@ -1,11 +1,11 @@
 {
-    "name": "pdf2go",
-    "short_name": "pdf2go",
+    "name": "SheetSaver",
+    "short_name": "SheetSaver",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "SheetSaver combines pages to reduce paper waste.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

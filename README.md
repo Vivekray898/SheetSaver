@@ -1,5 +1,5 @@
 
-# PDF Page Combiner
+# SheetSaver
 
 A small Flutter app that combines two PDF pages into one A4 landscape sheet to save paper when printing. The app supports Web, Android and iOS (mobile) with platform-specific download/share handling.
 

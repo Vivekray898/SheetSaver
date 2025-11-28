@@ -1,4 +1,4 @@
-package com.example.pdf2go
+package com.example.sheetsaver
 
 import io.flutter.embedding.android.FlutterActivity
 
