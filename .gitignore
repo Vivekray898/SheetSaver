@@ -1,0 +1,62 @@
+# Flutter/Dart generated files
+.dart_tool/
+.pub/
+.packages
+packaged_lock.json
+
+# Build outputs
+/build/
+
+# Flutter/Dart/IDE files
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-versions
+.metadata
+
+# Android specific
+/android/.gradle/
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+/android/local.properties
+/android/app/*.keystore
+/android/key.properties
+
+# iOS specific
+/ios/Flutter/.last_build_id
+/ios/Pods/
+/ios/Runner/GeneratedPluginRegistrant.*
+
+# Visual Studio Code
+/.vscode/
+
+# IntelliJ / Android Studio
+*.iml
+.idea/
+.gradle/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+
+# Generated files
+**/generated/**
+
+# Sensitive files
+*.jks
+*.keystore
+key.properties
+
+# Web
+/.dart_tool/**/build_web_compilers/
+
+# Other
+*.class
+*.pyc
+
