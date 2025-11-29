@@ -43,6 +43,11 @@ dependencies:
   image: ^4.5.4
   vector_math: ^2.1.4
   device_info_plus: ^9.1.2  # Compatible with syncfusion_flutter_pdfviewer
+  
+  # Camera & Document Scanning
+  camera: ^0.10.5+9
+  image_picker: ^1.0.7
+  photo_view: ^0.14.0  # For zoom/pan preview
 
 dev_dependencies:
   flutter_test:

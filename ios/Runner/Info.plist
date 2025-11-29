@@ -46,8 +46,12 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Need access to save PDF files</string>
+	<string>SheetSaver needs access to your photo library to save and import scanned documents and PDF files.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Need access to files</string>
+	<string>SheetSaver needs access to your camera to scan documents and capture images for PDF creation.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>SheetSaver may need microphone access for video recording features.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>SheetSaver needs permission to save scanned documents to your photo library.</string>
 </dict>
 </plist>

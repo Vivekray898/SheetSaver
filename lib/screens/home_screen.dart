@@ -12,6 +12,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart' as syncfusion;
 import 'preview_screen.dart';
 import 'preview_editor_screen.dart';
 import 'scan_screen.dart';
+import 'document_scanner_screen.dart';
 import 'page_selector_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -179,7 +180,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const ScanScreen()),
+      MaterialPageRoute(builder: (context) => const DocumentScannerScreen()),
     );
 
     if (result != null && result is File) {
