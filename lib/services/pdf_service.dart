@@ -4,10 +4,6 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as syncfusion;
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import 'package:image/image.dart' as img;
 import '../models/page_layout.dart';
 import '../models/combine_mode.dart';
 
@@ -364,155 +360,268 @@ class PdfService {
     }
   }
 
+  /// Combines PDF pages using vector-based approach (fast & high quality)
+  /// Portrait mode: Rotates portrait pages 90° and stacks vertically on portrait A4
+  /// Landscape mode: Places pages side-by-side on landscape A4
   Future<Uint8List> combinePdfWithLayout(
     dynamic inputFile,
-    DocumentLayout layout,
-  ) async {
+    DocumentLayout layout, {
+    void Function(int current, int total)? onProgress,
+  }) async {
+    debugPrint('=== STARTING PDF COMBINE (Vector Mode) ===');
+    final startTime = DateTime.now();
+
     final bytes = await _resolveBytes(inputFile);
+    final sourceDoc = syncfusion.PdfDocument(inputBytes: bytes);
 
-    final pdf = pw.Document();
-    // Landscape mode: A4 landscape (pages side-by-side)
-    // Portrait mode: A4 portrait (pages stacked vertically)
-    final PdfPageFormat pageFormat = layout.layoutMode == CombineMode.landscape
-        ? PdfPageFormat.a4.landscape
-        : PdfPageFormat.a4; // Portrait A4: 210mm x 297mm
+    try {
+      final outputDoc = syncfusion.PdfDocument();
 
-    // Render each sheet
-    for (final sheet in layout.sheets) {
-      if (layout.layoutMode == CombineMode.portrait) {
-        // Portrait mode: Stack pages vertically using Column with Expanded
-        // Source portrait pages are rotated 90° clockwise to become landscape
-        // Then stacked vertically on portrait A4
-        final List<pw.Widget> columnChildren = [];
+      // Set page orientation based on layout mode
+      outputDoc.pageSettings.size = syncfusion.PdfPageSize.a4;
+      outputDoc.pageSettings.orientation =
+          layout.layoutMode == CombineMode.landscape
+              ? syncfusion.PdfPageOrientation.landscape
+              : syncfusion.PdfPageOrientation.portrait;
 
-        for (int i = 0; i < sheet.pages.length; i++) {
-          final pageLayout = sheet.pages[i];
-          // Render and rotate page 90° clockwise (portrait → landscape)
-          final imageBytes = await _renderAndRotatePageForPortraitMode(
-              bytes, pageLayout.pageIndex);
-          final image = pw.MemoryImage(imageBytes);
+      final int totalSheets = layout.sheets.length;
 
-          columnChildren.add(
-            pw.Expanded(
-              flex: 1,
-              child: pw.Container(
-                width: double.infinity,
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Image(image, fit: pw.BoxFit.contain),
-              ),
-            ),
+      for (int sheetIdx = 0; sheetIdx < totalSheets; sheetIdx++) {
+        final sheet = layout.sheets[sheetIdx];
+        debugPrint('Processing sheet ${sheetIdx + 1}/${totalSheets}...');
+
+        // Report progress
+        onProgress?.call(sheetIdx + 1, totalSheets);
+
+        // Create new output page
+        final outputPage = outputDoc.pages.add();
+        final graphics = outputPage.graphics;
+        final pageSize = outputPage.getClientSize();
+
+        if (layout.layoutMode == CombineMode.portrait) {
+          // Portrait mode: Stack pages vertically, rotate portrait pages 90°
+          _drawPortraitLayoutSheet(
+            sourceDoc: sourceDoc,
+            graphics: graphics,
+            pageSize: pageSize,
+            pages: sheet.pages,
           );
-
-          // Add divider between pages (not after the last one)
-          if (i < sheet.pages.length - 1) {
-            columnChildren.add(pw.SizedBox(height: 4));
-            columnChildren.add(pw.Divider(thickness: 1));
-            columnChildren.add(pw.SizedBox(height: 4));
-          }
+        } else {
+          // Landscape mode: Place pages side-by-side
+          _drawLandscapeLayoutSheet(
+            sourceDoc: sourceDoc,
+            graphics: graphics,
+            pageSize: pageSize,
+            pages: sheet.pages,
+          );
         }
 
-        // If only one page, add empty expanded to fill the other half
-        if (sheet.pages.length == 1) {
-          columnChildren.add(pw.Expanded(flex: 1, child: pw.Container()));
+        // Yield to UI thread periodically
+        if (sheetIdx % 2 == 0) {
+          await Future<void>.delayed(Duration.zero);
         }
+      }
 
-        pdf.addPage(
-          pw.Page(
-            pageFormat: pageFormat,
-            margin: const pw.EdgeInsets.all(12),
-            build: (context) {
-              return pw.Column(
-                mainAxisAlignment: pw.MainAxisAlignment.start,
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: columnChildren,
-              );
-            },
-          ),
+      // NO COMPRESSION for scanned PDFs - preserves image quality
+      outputDoc.compressionLevel = syncfusion.PdfCompressionLevel.none;
+
+      final outputBytes = Uint8List.fromList(outputDoc.saveSync());
+
+      final duration = DateTime.now().difference(startTime);
+      debugPrint('=== COMPLETED IN ${duration.inMilliseconds}ms ===');
+
+      outputDoc.dispose();
+      return outputBytes;
+    } finally {
+      sourceDoc.dispose();
+    }
+  }
+
+  /// Draw pages stacked vertically for portrait layout
+  /// Rotates portrait source pages 90° clockwise to appear landscape
+  void _drawPortraitLayoutSheet({
+    required syncfusion.PdfDocument sourceDoc,
+    required syncfusion.PdfGraphics graphics,
+    required Size pageSize,
+    required List<PageLayout> pages,
+  }) {
+    // MINIMAL margins for maximum space usage (5pt = ~1.76mm)
+    const double padding = 5.0;
+    const double dividerHeight = 4.0;
+
+    final double availableHeight = pageSize.height -
+        (padding * 2) -
+        (pages.length > 1 ? dividerHeight : 0);
+    final double slotHeight =
+        pages.length > 1 ? availableHeight / 2 : availableHeight;
+    final double slotWidth = pageSize.width - (padding * 2);
+
+    for (int i = 0; i < pages.length; i++) {
+      final pageLayout = pages[i];
+      final sourcePage = sourceDoc.pages[pageLayout.pageIndex];
+      final template = sourcePage.createTemplate();
+      final sourceSize = sourcePage.size;
+
+      // Check if source is portrait (needs rotation)
+      final bool isSourcePortrait = sourceSize.height > sourceSize.width;
+
+      // Calculate slot position
+      final double slotY = padding + (i * (slotHeight + dividerHeight));
+      final Rect slot = Rect.fromLTWH(padding, slotY, slotWidth, slotHeight);
+
+      if (isSourcePortrait) {
+        // Rotate 90° clockwise: portrait → landscape
+        _drawRotatedTemplate(
+          graphics: graphics,
+          template: template,
+          sourceSize: sourceSize,
+          slot: slot,
+          rotationDegrees: 90,
         );
       } else {
-        // Landscape mode: Use Row with side-by-side layout (no rotation)
-        final List<pw.Widget> rowChildren = [];
-
-        for (int i = 0; i < sheet.pages.length; i++) {
-          final pageLayout = sheet.pages[i];
-          final imageBytes =
-              await _renderPageToImage(bytes, pageLayout.pageIndex);
-          final image = pw.MemoryImage(imageBytes);
-
-          rowChildren.add(
-            pw.Expanded(
-              flex: 1,
-              child: pw.Container(
-                padding: const pw.EdgeInsets.all(8),
-                child: pw.Image(image, fit: pw.BoxFit.contain),
-              ),
-            ),
-          );
-
-          // Add divider between pages (not after the last one)
-          if (i < sheet.pages.length - 1) {
-            rowChildren.add(
-              pw.Container(
-                width: 1,
-                color: PdfColors.grey400,
-              ),
-            );
-          }
-        }
-
-        // If only one page, add empty expanded to fill the other half
-        if (sheet.pages.length == 1) {
-          rowChildren.add(pw.Expanded(flex: 1, child: pw.Container()));
-        }
-
-        pdf.addPage(
-          pw.Page(
-            pageFormat: pageFormat,
-            margin: const pw.EdgeInsets.all(12),
-            build: (context) {
-              return pw.Row(
-                children: rowChildren,
-              );
-            },
-          ),
+        // Already landscape, draw directly
+        _drawFittedTemplate(
+          graphics: graphics,
+          template: template,
+          sourceSize: sourceSize,
+          slot: slot,
         );
       }
     }
 
-    return pdf.save();
+    // Draw thin divider line between pages
+    if (pages.length > 1) {
+      final dividerY = padding + slotHeight + (dividerHeight / 2);
+      graphics.drawLine(
+        syncfusion.PdfPen(syncfusion.PdfColor(220, 220, 220), width: 0.5),
+        Offset(padding, dividerY),
+        Offset(pageSize.width - padding, dividerY),
+      );
+    }
   }
 
-  /// Render page and rotate 90° clockwise for portrait mode
-  /// This converts portrait source pages to landscape orientation
-  Future<Uint8List> _renderAndRotatePageForPortraitMode(
-      Uint8List pdfBytes, int pageIndex) async {
-    // Render page to image
-    final originalBytes = await _renderPageToImage(pdfBytes, pageIndex);
+  /// Draw pages side-by-side for landscape layout
+  void _drawLandscapeLayoutSheet({
+    required syncfusion.PdfDocument sourceDoc,
+    required syncfusion.PdfGraphics graphics,
+    required Size pageSize,
+    required List<PageLayout> pages,
+  }) {
+    // MINIMAL margins for maximum space usage (5pt = ~1.76mm)
+    const double padding = 5.0;
+    const double dividerWidth = 4.0;
 
-    // Decode the image
-    final originalImage = img.decodeImage(originalBytes);
-    if (originalImage == null) {
-      throw Exception('Failed to decode page $pageIndex');
+    final double availableWidth =
+        pageSize.width - (padding * 2) - (pages.length > 1 ? dividerWidth : 0);
+    final double slotWidth =
+        pages.length > 1 ? availableWidth / 2 : availableWidth;
+    final double slotHeight = pageSize.height - (padding * 2);
+
+    for (int i = 0; i < pages.length; i++) {
+      final pageLayout = pages[i];
+      final sourcePage = sourceDoc.pages[pageLayout.pageIndex];
+      final template = sourcePage.createTemplate();
+      final sourceSize = sourcePage.size;
+
+      // Calculate slot position
+      final double slotX = padding + (i * (slotWidth + dividerWidth));
+      final Rect slot = Rect.fromLTWH(slotX, padding, slotWidth, slotHeight);
+
+      // Check if rotation needed (landscape pages on portrait slots or vice versa)
+      final bool isSourcePortrait = sourceSize.height > sourceSize.width;
+      final bool isSlotPortrait = slotHeight > slotWidth;
+
+      if (isSourcePortrait != isSlotPortrait) {
+        // Rotate 90° to fit
+        _drawRotatedTemplate(
+          graphics: graphics,
+          template: template,
+          sourceSize: sourceSize,
+          slot: slot,
+          rotationDegrees: -90,
+        );
+      } else {
+        // Draw directly
+        _drawFittedTemplate(
+          graphics: graphics,
+          template: template,
+          sourceSize: sourceSize,
+          slot: slot,
+        );
+      }
     }
 
-    // Check if page is portrait (height > width) - if so, rotate 90° clockwise
-    if (originalImage.height > originalImage.width) {
-      // Rotate 90° clockwise to make it landscape
-      final rotatedImage = img.copyRotate(originalImage, angle: 90);
-      return Uint8List.fromList(img.encodePng(rotatedImage));
+    // Draw thin divider line between pages
+    if (pages.length > 1) {
+      final dividerX = padding + slotWidth + (dividerWidth / 2);
+      graphics.drawLine(
+        syncfusion.PdfPen(syncfusion.PdfColor(220, 220, 220), width: 0.5),
+        Offset(dividerX, padding),
+        Offset(dividerX, pageSize.height - padding),
+      );
     }
-
-    // Already landscape, return as-is
-    return originalBytes;
   }
 
-  Future<Uint8List> _renderPageToImage(
-      Uint8List pdfBytes, int pageIndex) async {
-    // Use printing package to render specific page to image
-    await for (final page in Printing.raster(pdfBytes, pages: [pageIndex])) {
-      return await page.toPng();
-    }
-    throw Exception('Failed to render page $pageIndex');
+  /// Draw template fitted to slot without rotation
+  void _drawFittedTemplate({
+    required syncfusion.PdfGraphics graphics,
+    required syncfusion.PdfTemplate template,
+    required Size sourceSize,
+    required Rect slot,
+  }) {
+    // Use 98% of available space for maximum content size
+    final double scale = math.min(
+          slot.width / sourceSize.width,
+          slot.height / sourceSize.height,
+        ) *
+        0.98;
+
+    final double drawWidth = sourceSize.width * scale;
+    final double drawHeight = sourceSize.height * scale;
+    final double offsetX = slot.left + (slot.width - drawWidth) / 2;
+    final double offsetY = slot.top + (slot.height - drawHeight) / 2;
+
+    graphics.drawPdfTemplate(
+      template,
+      Offset(offsetX, offsetY),
+      Size(drawWidth, drawHeight),
+    );
+  }
+
+  /// Draw template with rotation (for portrait→landscape conversion)
+  void _drawRotatedTemplate({
+    required syncfusion.PdfGraphics graphics,
+    required syncfusion.PdfTemplate template,
+    required Size sourceSize,
+    required Rect slot,
+    required double rotationDegrees,
+  }) {
+    // After rotation: width↔height swap
+    final double rotatedWidth = sourceSize.height;
+    final double rotatedHeight = sourceSize.width;
+
+    // Use 98% of available space for maximum content size
+    final double scale = math.min(
+          slot.width / rotatedWidth,
+          slot.height / rotatedHeight,
+        ) *
+        0.98;
+
+    final double centerX = slot.left + slot.width / 2;
+    final double centerY = slot.top + slot.height / 2;
+
+    graphics.save();
+    graphics.translateTransform(centerX, centerY);
+    graphics.rotateTransform(rotationDegrees);
+
+    // Draw centered at origin (rotation pivot)
+    graphics.drawPdfTemplate(
+      template,
+      Offset(-sourceSize.width * scale / 2, -sourceSize.height * scale / 2),
+      Size(sourceSize.width * scale, sourceSize.height * scale),
+    );
+
+    graphics.restore();
   }
 }
 

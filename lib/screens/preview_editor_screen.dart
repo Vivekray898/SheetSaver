@@ -516,7 +516,29 @@ class _PreviewEditorScreenState extends State<PreviewEditorScreen> {
   }
 
   Future<void> _downloadPdf() async {
-    setState(() => _isProcessing = true);
+    // Show progress dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              const Text('Combining pages...'),
+              const SizedBox(height: 8),
+              Text(
+                'Processing ${_currentLayout.sheets.length} sheets',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
 
     try {
       final pdfService = PdfService();
@@ -526,6 +548,9 @@ class _PreviewEditorScreenState extends State<PreviewEditorScreen> {
       );
 
       if (!mounted) return;
+
+      // Close progress dialog
+      Navigator.of(context).pop();
 
       // Save and share/download
       await Printing.sharePdf(bytes: pdfBytes, filename: 'combined_layout.pdf');
@@ -537,13 +562,15 @@ class _PreviewEditorScreenState extends State<PreviewEditorScreen> {
       );
     } catch (e) {
       if (!mounted) return;
+
+      // Close progress dialog if open
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
-    } finally {
-      if (mounted) {
-        setState(() => _isProcessing = false);
-      }
     }
   }
 }
